@@ -117,13 +117,17 @@
 <script>
 // Canales de noticias de Chile en YouTube (ID de canal; se muestra su transmisión en vivo actual)
 const CANALES = [
+  // Canales oficiales de noticias de Chile. El ORDEN es la prioridad: si una pantalla no tiene
+  // transmisión en vivo, se reemplaza por el primer canal de esta lista que esté en vivo y no esté ya en pantalla.
   // vids = videos en vivo conocidos (9 oct 2026); se prueban si no se puede averiguar el actual
-  {n:"24 Horas (TVN)", id:"UCTXNz3gjAypWp3EhlIATEJQ", vids:["R1zazWO2How","3JM61yuIzS4"]},
-  {n:"T13", id:"UCsRnhjcUCR78Q3Ud6OXCTNg", vids:["8eIYlB__Z4k","oy1dvCRd42s"]},
-  {n:"CNN Chile", id:"UCpOAcjJNAp0Y0fhznRrXIJQ", vids:["Fgdw807FSl8"]},
+  {n:"24 Horas (TVN)", id:"UCTXNz3gjAypWp3EhlIATEJQ", vids:["GbPENp_grSQ","3JM61yuIzS4"]},
+  {n:"T13", id:"UCsRnhjcUCR78Q3Ud6OXCTNg", vids:["oy1dvCRd42s","8eIYlB__Z4k"]},
+  {n:"CNN Chile", id:"UCpOAcjJNAp0Y0fhznRrXIJQ", vids:[]},
   {n:"Meganoticias", id:"UCkccyEbqhhM3uKOI6Shm-4Q", vids:["TOObJ46ujPg","0-T-97RbSV8"]},
   {n:"CHV Noticias", id:"UCRsUoZYC1ULUspipMRnMhwg", vids:["C_P66PCQK3k"]},
-  {n:"BioBío TV", id:"UCUyXwD-J--EZlv90KHyqOUg", vids:["akuL1FgEUmM"]}
+  {n:"BioBío Chile", id:"UCuvM3c8rmdApmk-g22shZ7w", vids:["WRJK27H3Zi0"]},
+  {n:"BioBío TV", id:"UCUyXwD-J--EZlv90KHyqOUg", vids:[]},
+  {n:"Cooperativa", id:"UC-uTo_BpA0s3EPTUg37t0jw", vids:[]}
 ];
 const KEY = "noticias4_v2";
 let urls = CANALES.slice(0,4).map(c=>c.id);
@@ -296,8 +300,20 @@ function probar(i, list, k, my){
   YT_READY.then(()=> {
     if (my !== token[i]) return;
     players[i] = new YT.Player(f, { events: {
-      onReady: ev => { try { ev.target.mute(); ev.target.playVideo(); } catch(e){} },
+      onReady: ev => {
+        try { ev.target.mute(); ev.target.playVideo(); } catch(e){}
+        if (op.ch) setTimeout(function revisar(){            // solo para canales (no para links pegados a mano)
+          if (done || my !== token[i]) return;
+          if (document.hidden) return setTimeout(revisar, 3000);
+          let vd = {}; try { vd = ev.target.getVideoData() || {}; } catch(e){}
+          const st = ev.target.getPlayerState ? ev.target.getPlayerState() : -1;
+          const terminado = vd.isLive === false && ev.target.getDuration() > 0;               // grabación, ya no está en vivo
+          const programado = vd.isLive === true && !vd.allowLiveDvr && st !== 1 && st !== 3;  // "comenzará en X días"
+          if (terminado || programado) siguiente();
+        }, 4000);
+      },
       onStateChange: ev => {
+        if (ev.data === 1 && !done && op.ch) { let vd = {}; try { vd = ev.target.getVideoData() || {}; } catch(e){} if (vd.isLive === false && ev.target.getDuration() > 0) return siguiente(); }
         if (ev.data === 1 && !done) { done = true; anyPlaying = true; clearTimeout(timer); applyAudio(i); updateHub(); }
         if (ev.data === 0) setTimeout(()=> { if (my === token[i]) render(i); }, 5000); // terminó la transmisión: buscar de nuevo
       },
@@ -316,6 +332,12 @@ function probar(i, list, k, my){
   const bd = document.createElement("div"); bd.className = "badge"; c.appendChild(bd);
   updateHub();
 }
+
+// Cada 10 minutos, las pantallas que muestran un canal de reemplazo vuelven a intentar su canal original
+setInterval(()=>{
+  if (document.hidden) return;
+  cells.forEach((_,i)=>{ if (isCh(urls[i]) && showing[i] && showing[i] !== urls[i]) { _lj = null; render(i); } });
+}, 10*60*1000);
 
 // Si el iPad no deja que los videos partan solos (p. ej. modo de bajo consumo), un toque los inicia.
 setTimeout(function chk(){ if (document.hidden) return setTimeout(chk, 3000); if (!anyPlaying) document.getElementById("tapAll").style.display = "flex"; }, 25000);
