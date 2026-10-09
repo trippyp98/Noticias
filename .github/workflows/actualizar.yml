@@ -11,19 +11,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Buscar videos en vivo
+        shell: python
         run: |
-          CANALES="UCTXNz3gjAypWp3EhlIATEJQ UCsRnhjcUCR78Q3Ud6OXCTNg UCpOAcjJNAp0Y0fhznRrXIJQ UCkccyEbqhhM3uKOI6Shm-4Q UCRsUoZYC1ULUspipMRnMhwg UCUyXwD-J--EZlv90KHyqOUg"
-          [ -f live.json ] || echo '{}' > live.json
-          for ch in $CANALES; do
-            v=$(curl -sL -m 20 \
-              -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36' \
-              -H 'Cookie: CONSENT=YES+cb; SOCS=CAI' -H 'Accept-Language: es-CL,es' \
-              "https://www.youtube.com/channel/$ch/live" \
-              | grep -o 'rel="canonical" href="https://www.youtube.com/watch?v=[A-Za-z0-9_-]\{11\}' | head -1 | tail -c 12)
-            echo "$ch -> ${v:-sin dato}"
-            if [ -n "$v" ]; then jq --arg c "$ch" --arg v "$v" '.[$c]=$v' live.json > t.json && mv t.json live.json; fi
-          done
-          cat live.json
+          import json, re, urllib.request
+          CANALES = {
+            "UCTXNz3gjAypWp3EhlIATEJQ": "24 Horas", "UCsRnhjcUCR78Q3Ud6OXCTNg": "T13",
+            "UCpOAcjJNAp0Y0fhznRrXIJQ": "CNN Chile", "UCkccyEbqhhM3uKOI6Shm-4Q": "Meganoticias",
+            "UCRsUoZYC1ULUspipMRnMhwg": "CHV Noticias", "UCUyXwD-J--EZlv90KHyqOUg": "BioBio TV"}
+          H = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+               "Cookie": "CONSENT=YES+cb; SOCS=CAI", "Accept-Language": "es-CL,es"}
+          try: data = json.load(open("live.json"))
+          except Exception: data = {}
+          for ch, nombre in CANALES.items():
+              try:
+                  h = urllib.request.urlopen(urllib.request.Request(f"https://www.youtube.com/channel/{ch}/live", headers=H), timeout=20).read().decode("utf-8", "ignore")
+              except Exception as e:
+                  print(nombre, "error:", e); continue
+              if "ytInitialData" not in h:
+                  print(nombre, "YouTube no entregó la página; se mantiene el dato anterior"); continue
+              m = re.search(r'rel="canonical" href="https://www\.youtube\.com/watch\?v=([\w-]{11})"', h)
+              st = re.search(r'"playabilityStatus":\{"status":"(\w+)"', h)
+              en_vivo = bool(m and st and st.group(1) == "OK" and '"isUpcoming":true' not in h)
+              data[ch] = m.group(1) if en_vivo else ""
+              print(nombre, "->", data[ch] or "no está en vivo")
+          json.dump(data, open("live.json", "w"), indent=2)
       - name: Guardar cambios
         run: |
           git config user.name "github-actions"
