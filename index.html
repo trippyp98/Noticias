@@ -37,6 +37,11 @@
   body.idle .tools,body.idle #bar{opacity:0;pointer-events:none}
   #bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:5;display:flex;gap:6px;transition:opacity .3s}
   #bar button{background:rgba(0,0,0,.7);font-size:13px;padding:7px 12px}
+  .yt,.yt iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+  .tools .lbl{align-self:center;font-size:12px;background:rgba(0,0,0,.65);padding:5px 8px;border-radius:6px}
+  .tap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;background:rgba(0,0,0,.4)}
+  #tapAll{position:fixed;inset:0;z-index:8;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35)}
+  #tapAll button{font-size:18px;padding:14px 22px}
   #warn{position:fixed;inset:0;z-index:9;background:#111;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;line-height:1.6}
 </style>
 </head>
@@ -46,18 +51,19 @@
   <button id="fs">⛶ Pantalla completa (F)</button>
   <button id="editAll" class="sec">✎ Cambiar canales (E)</button>
 </div>
+<div id="tapAll"><button>▶ Tocar para iniciar los videos</button></div>
 <div id="warn"><div>Esta página se abrió como archivo y YouTube la bloquea (Error 153).<br>Ciérrala y ábrela con <b>Abrir Noticias.bat</b>, que está en la misma carpeta.</div></div>
 
 <script>
 // Canales de noticias de Chile en YouTube (ID de canal; se muestra su transmisión en vivo actual)
 const CANALES = [
-  // vid = último video en vivo conocido (9 oct 2026), se usa solo si no se puede averiguar el actual
-  {n:"24 Horas (TVN)", id:"UCTXNz3gjAypWp3EhlIATEJQ", vid:"R1zazWO2How"},
-  {n:"T13", id:"UCsRnhjcUCR78Q3Ud6OXCTNg", vid:"8eIYlB__Z4k"},
-  {n:"CNN Chile", id:"UCpOAcjJNAp0Y0fhznRrXIJQ", vid:"Fgdw807FSl8"},
-  {n:"Meganoticias", id:"UCkccyEbqhhM3uKOI6Shm-4Q", vid:"0-T-97RbSV8"},
-  {n:"CHV Noticias", id:"UCRsUoZYC1ULUspipMRnMhwg", vid:"C_P66PCQK3k"},
-  {n:"BioBío TV", id:"UCUyXwD-J--EZlv90KHyqOUg", vid:"akuL1FgEUmM"}
+  // vids = videos en vivo conocidos (9 oct 2026); se prueban si no se puede averiguar el actual
+  {n:"24 Horas (TVN)", id:"UCTXNz3gjAypWp3EhlIATEJQ", vids:["R1zazWO2How","3JM61yuIzS4"]},
+  {n:"T13", id:"UCsRnhjcUCR78Q3Ud6OXCTNg", vids:["8eIYlB__Z4k","oy1dvCRd42s"]},
+  {n:"CNN Chile", id:"UCpOAcjJNAp0Y0fhznRrXIJQ", vids:["Fgdw807FSl8"]},
+  {n:"Meganoticias", id:"UCkccyEbqhhM3uKOI6Shm-4Q", vids:["TOObJ46ujPg","0-T-97RbSV8"]},
+  {n:"CHV Noticias", id:"UCRsUoZYC1ULUspipMRnMhwg", vids:["C_P66PCQK3k"]},
+  {n:"BioBío TV", id:"UCUyXwD-J--EZlv90KHyqOUg", vids:["akuL1FgEUmM"]}
 ];
 const KEY = "noticias4_v2";
 let urls = CANALES.slice(0,4).map(c=>c.id);
@@ -91,53 +97,105 @@ function setAudio(i){
   cells.forEach((c,j)=>{ c.classList.toggle("audio", j===i); if(j===i){ ytCmd(j,"unMute"); ytCmd(j,"setVolume",[100]); } else ytCmd(j,"mute"); });
 }
 
+// ---- Reproducción con respaldo automático ----
+// Para cada pantalla se arma una lista de opciones (video en vivo actual, últimos videos conocidos,
+// transmisión del canal y, si nada funciona, otros canales). Si una opción da error o no empieza
+// a reproducirse en 20 s (por ejemplo "no disponible" o "comenzará en X días"), se pasa a la siguiente.
+const YT_READY = new Promise(res => {
+  window.onYouTubeIframeAPIReady = res;
+  const sc = document.createElement("script"); sc.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(sc);
+});
+const isCh = s => /^UC[\w-]{22}$/.test(s||"");
+const isVid = s => /^[\w-]{11}$/.test(s||"");
+const showing = {};   // pantalla -> id de canal que se está mostrando
+const token = [0,0,0,0];
+let anyPlaying = false;
+
 let _lj;
-const subs = {};   // pantalla -> canal de reemplazo
 function liveJson(){
   if (!_lj) _lj = fetch("live.json?t=" + Date.now(), {cache:"no-store"}).then(r=>r.ok ? r.json() : null).catch(()=>null);
   return _lj;
 }
-
-async function render(i){
-  const c = cells[i];
-  c.innerHTML = "";
-  delete subs[i];
-  let src = urls[i];
-  // Si es un canal, buscamos el video en vivo actual:
-  // 1) live.json (GitHub lo actualiza cada 15 min; "" = el canal no está transmitiendo)
-  // 2) servidor local del PC  3) último video conocido
-  // Si el canal no está en vivo, se muestra otro canal de la lista que sí lo esté.
-  if (/^UC[\w-]{22}$/.test(src) && location.protocol.startsWith("http")) {
-    const ch = src, pre = CANALES.find(x=>x.id===ch);
-    const lj = await liveJson();
-    if (lj && ch in lj) {
-      if (/^[\w-]{11}$/.test(lj[ch])) src = lj[ch];
-      else {
-        const alt = CANALES.find(x => /^[\w-]{11}$/.test(lj[x.id]||"") && !urls.includes(x.id) && !Object.values(subs).includes(x.id) );
-        if (alt) { subs[i] = alt.id; src = lj[alt.id]; }
-      }
-    }
-    if (src === ch && location.hostname === "localhost") {
-      try { const v = (await fetch("/live?ch=" + ch).then(r=>r.ok ? r.text() : "")).trim(); if (/^[\w-]{11}$/.test(v)) src = v; } catch(e){}
-    }
-    if (src === ch && pre && pre.vid) src = pre.vid;
+async function opcionesCanal(ch){
+  const c = CANALES.find(x=>x.id===ch) || {n:"", id:ch};
+  const out = [];
+  const lj = await liveJson();
+  if (lj && isVid(lj[ch])) out.push(lj[ch]);
+  if (location.hostname === "localhost") {
+    try { const v = (await fetch("/live?ch=" + ch).then(r=>r.ok ? r.text() : "")).trim(); if (isVid(v)) out.push(v); } catch(e){}
   }
-  const emb = toEmbed(src);
-  if (!emb) return showSetup(i);
+  (c.vids || []).forEach(v=> out.push(v));
+  out.push(ch); // transmisión en vivo del canal
+  return [...new Set(out)].map(src => ({src, ch, n:c.n}));
+}
+async function opciones(i){
+  const u = urls[i];
+  if (!isCh(u)) return [{src:u, ch:null, n:""}];
+  let list = await opcionesCanal(u);
+  // respaldo: otros canales que no estén en otra pantalla
+  for (const c of CANALES) if (!urls.includes(c.id)) list = list.concat(await opcionesCanal(c.id));
+  return list;
+}
+
+function render(i){
+  const c = cells[i];
+  const my = ++token[i];
+  c.innerHTML = "";
+  delete showing[i];
+  if (!toEmbed(urls[i])) return showSetup(i);
+  opciones(i).then(list => probar(i, list, 0, my));
+}
+
+function probar(i, list, k, my){
+  if (my !== token[i]) return;
+  const c = cells[i];
+  // saltar canales de respaldo que ya se están mostrando en otra pantalla
+  while (k < list.length && list[k].ch && list[k].ch !== urls[i] &&
+         Object.entries(showing).some(([j,ch]) => +j !== i && ch === list[k].ch)) k++;
+  if (k >= list.length) { // nada funcionó: dejamos la primera opción y un botón para reintentar
+    c.querySelector(".tap")?.remove();
+    const b = document.createElement("div"); b.className = "tap";
+    b.innerHTML = '<button>▶ Tocar para reproducir / reintentar</button>';
+    b.onclick = ()=> render(i);
+    c.appendChild(b); return;
+  }
+  const op = list[k];
+  c.querySelectorAll("iframe,.tools,.tap,.yt").forEach(e=>e.remove());
+  showing[i] = op.ch || urls[i];
+  const holder = document.createElement("div"); holder.className = "yt";
   const f = document.createElement("iframe");
-  f.src = emb;
+  f.src = toEmbed(op.src);
   f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
   f.referrerPolicy = "strict-origin-when-cross-origin";
-  f.addEventListener("load", ()=> setTimeout(()=>{ ytCmd(i, i===audioIdx ? "unMute" : "mute"); }, 2000));
-  c.appendChild(f);
+  holder.appendChild(f); c.appendChild(holder);
+
+  let done = false;
+  const siguiente = ()=>{ if (done || my !== token[i]) return; done = true; clearTimeout(timer); probar(i, list, k+1, my); };
+  const timer = setTimeout(siguiente, 20000);
+  YT_READY.then(()=> {
+    if (my !== token[i]) return;
+    new YT.Player(f, { events: {
+      onReady: ev => { try { ev.target.mute(); ev.target.playVideo(); } catch(e){} },
+      onStateChange: ev => {
+        if (ev.data === 1 && !done) { done = true; anyPlaying = true; clearTimeout(timer); if (i === audioIdx) { ev.target.unMute(); ev.target.setVolume(100); } }
+        if (ev.data === 0) setTimeout(()=> { if (my === token[i]) render(i); }, 5000); // terminó la transmisión: buscar de nuevo
+      },
+      onError: siguiente
+    }});
+  });
+
   const t = document.createElement("div");
   t.className = "tools";
-  t.innerHTML = '<button class="snd" title="Escuchar este (tecla '+(i+1)+')">🔊 '+(i+1)+'</button><button class="rl" title="Recargar">⟳</button><button class="ed" title="Cambiar canal">✎</button>';
+  const nombre = (op.ch && op.ch !== urls[i]) ? '<span class="lbl">' + op.n + '</span>' : '';
+  t.innerHTML = nombre + '<button class="snd" title="Escuchar este (tecla '+(i+1)+')">🔊 '+(i+1)+'</button><button class="rl" title="Recargar">⟳</button><button class="ed" title="Cambiar canal">✎</button>';
   t.querySelector(".snd").onclick = ()=> setAudio(i);
   t.querySelector(".rl").onclick = ()=>{ _lj = null; render(i); };
   t.querySelector(".ed").onclick = ()=> showSetup(i);
   c.appendChild(t);
 }
+
+// Si el iPad no deja que los videos partan solos (p. ej. modo de bajo consumo), un toque los inicia.
+setTimeout(()=>{ if (!anyPlaying) document.getElementById("tapAll").style.display = "flex"; }, 12000);
 
 function showSetup(i){
   const c = cells[i];
@@ -171,6 +229,7 @@ function toggleFS(){ document.fullscreenElement ? document.exitFullscreen() : do
 const fsOK = !!document.documentElement.requestFullscreen;
 if (!fsOK || navigator.standalone || matchMedia("(display-mode: standalone)").matches) document.getElementById("fs").style.display = "none";
 document.getElementById("fs").onclick = toggleFS;
+document.getElementById("tapAll").onclick = ()=>{ document.getElementById("tapAll").style.display="none"; cells.forEach((_,i)=>render(i)); };
 document.getElementById("editAll").onclick = ()=> cells.forEach((_,i)=>showSetup(i));
 document.addEventListener("keydown", e=>{
   if (e.key==="f"||e.key==="F") toggleFS();
