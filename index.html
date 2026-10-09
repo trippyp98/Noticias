@@ -42,6 +42,43 @@
   .tap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;background:rgba(0,0,0,.4)}
   #tapAll{position:fixed;inset:0;z-index:8;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35)}
   #tapAll button{font-size:18px;padding:14px 22px}
+  /* pantalla con audio */
+  .cell{transition:box-shadow .25s}
+  .cell.audio{box-shadow:inset 0 0 0 3px #2d6cdf}
+  .badge{position:absolute;left:8px;top:8px;z-index:3;background:#2d6cdf;color:#fff;border-radius:999px;padding:4px 10px;font-size:13px;font-weight:600;display:none;pointer-events:none}
+  .cell.audio .badge{display:block;animation:pulse 1.6s ease-in-out 2}
+  body.muted .cell.audio{box-shadow:inset 0 0 0 3px #777}
+  body.muted .cell.audio .badge{background:#555}
+  @keyframes pulse{50%{transform:scale(1.12)}}
+  /* layout destacado: la pantalla con audio grande a la izquierda, las otras 3 a la derecha */
+  body.focus #grid{grid-template-columns:3fr 1fr;grid-template-rows:1fr 1fr 1fr}
+  body.focus .cell.audio{grid-column:1;grid-row:1 / 4}
+  body.focus .cell:not(.audio){grid-column:2}
+  /* control central */
+  #hub{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;width:216px;padding:10px;border-radius:20px;
+       background:rgba(14,18,26,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 8px 30px rgba(0,0,0,.6);
+       border:1px solid rgba(255,255,255,.08);transition:opacity .35s,transform .25s,left .3s,top .3s;touch-action:manipulation}
+  body.focus #hub{left:37.5%;top:auto;bottom:62px;transform:translateX(-50%)}
+  body.idle #hub{opacity:.28}
+  #hub.min{width:auto;padding:0;border-radius:999px}
+  #hub.min .full{display:none}
+  #hub .mini{display:none;width:56px;height:56px;border-radius:999px;font-size:24px;background:#2d6cdf}
+  #hub.min .mini{display:block}
+  #hub .map{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  #hub .q{position:relative;height:64px;padding:6px;border-radius:12px;background:#1f2633;color:#cfd6e4;display:flex;flex-direction:column;
+          align-items:center;justify-content:center;gap:2px;font-size:12px;line-height:1.15;text-align:center;transition:background .2s,transform .1s}
+  #hub .q b{font-size:18px}
+  #hub .q:active{transform:scale(.95)}
+  #hub .q.on{background:#2d6cdf;color:#fff}
+  #hub .q.on::after{content:"🔊";position:absolute;top:4px;right:6px;font-size:12px}
+  body.muted #hub .q.on{background:#555}
+  #hub .row2{display:flex;gap:6px;margin-top:8px;align-items:center}
+  #hub .row2 button{flex:none;width:40px;height:40px;padding:0;border-radius:10px;background:#1f2633;font-size:17px}
+  #hub .row2 button.act{background:#2d6cdf}
+  #hub input[type=range]{flex:1;min-width:0;accent-color:#2d6cdf;height:28px}
+  #hub .hint2{margin-top:6px;font-size:11px;color:#8792a6;text-align:center}
+  #toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:9;background:rgba(0,0,0,.8);padding:8px 14px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none}
+  #toast.show{opacity:1}
   #warn{position:fixed;inset:0;z-index:9;background:#111;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;line-height:1.6}
 </style>
 </head>
@@ -51,6 +88,20 @@
   <button id="fs">⛶ Pantalla completa (F)</button>
   <button id="editAll" class="sec">✎ Cambiar canales (E)</button>
 </div>
+<div id="hub">
+  <button class="mini" title="Mostrar control de audio">🔊</button>
+  <div class="full">
+    <div class="map" id="map"></div>
+    <div class="row2">
+      <button id="mute" title="Silenciar todo (M)">🔇</button>
+      <input id="vol" type="range" min="0" max="100" step="5" aria-label="Volumen">
+      <button id="lay" title="Agrandar la pantalla con audio (G)">⛶</button>
+      <button id="hide" title="Achicar este control">✕</button>
+    </div>
+    <div class="hint2">Toca una pantalla para escucharla · doble toque = agrandar</div>
+  </div>
+</div>
+<div id="toast"></div>
 <div id="tapAll"><button>▶ Tocar para iniciar los videos</button></div>
 <div id="warn"><div>Esta página se abrió como archivo y YouTube la bloquea (Error 153).<br>Ciérrala y ábrela con <b>Abrir Noticias.bat</b>, que está en la misma carpeta.</div></div>
 
@@ -92,9 +143,66 @@ function ytCmd(i, func, args){
   const f = cells[i].querySelector("iframe");
   if (f && f.src.includes("youtube")) f.contentWindow.postMessage(JSON.stringify({event:"command",func,args:args||[]}), "*");
 }
-function setAudio(i){
-  audioIdx = i;
-  cells.forEach((c,j)=>{ c.classList.toggle("audio", j===i); if(j===i){ ytCmd(j,"unMute"); ytCmd(j,"setVolume",[100]); } else ytCmd(j,"mute"); });
+// ---- Audio: una sola pantalla suena a la vez ----
+const players = [];          // pantalla -> YT.Player
+const PREF = "noticias4_pref";
+let pref = {audio:0, vol:100, muted:false, focus:false, min:false};
+try { Object.assign(pref, JSON.parse(localStorage.getItem(PREF)) || {}); } catch(e){}
+function savePref(){ try{ localStorage.setItem(PREF, JSON.stringify(pref)); }catch(e){} }
+audioIdx = Math.min(3, Math.max(0, +pref.audio || 0));
+
+function applyAudio(j){
+  const p = players[j], on = (j === audioIdx && !pref.muted);
+  try {
+    if (p && p.mute) { if (on) { p.unMute(); p.setVolume(pref.vol); } else p.mute(); }
+    else { if (on) { ytCmd(j,"unMute"); ytCmd(j,"setVolume",[pref.vol]); } else ytCmd(j,"mute"); }
+  } catch(e){}
+}
+function setAudio(i, silent){
+  audioIdx = i; pref.audio = i;
+  if (pref.muted) { pref.muted = false; }
+  savePref();
+  cells.forEach((c,j)=>{ c.classList.toggle("audio", j===i); applyAudio(j); });
+  updateHub();
+  if (!silent) toast("🔊 Pantalla " + (i+1) + " · " + nombrePantalla(i));
+}
+function toggleMute(){
+  pref.muted = !pref.muted; savePref();
+  cells.forEach((_,j)=>applyAudio(j)); updateHub();
+  toast(pref.muted ? "🔇 Todo en silencio" : "🔊 Sonido activado");
+}
+function setVol(v){ pref.vol = Math.max(0, Math.min(100, v)); savePref(); applyAudio(audioIdx); updateHub(); }
+function toggleFocus(){ pref.focus = !pref.focus; savePref(); updateHub(); toast(pref.focus ? "⛶ Pantalla " + (audioIdx+1) + " agrandada" : "▦ Cuatro pantallas iguales"); }
+
+function nombrePantalla(i){
+  const id = showing[i] || urls[i];
+  const c = CANALES.find(x=>x.id===id);
+  return c ? c.n : (urls[i] ? "Video" : "Vacía");
+}
+let tt;
+function toast(msg){ const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(()=>t.classList.remove("show"), 1600); }
+
+function updateHub(){
+  document.body.classList.toggle("muted", !!pref.muted);
+  document.body.classList.toggle("focus", !!pref.focus);
+  const hub = document.getElementById("hub"); hub.classList.toggle("min", !!pref.min);
+  const map = document.getElementById("map");
+  map.innerHTML = [0,1,2,3].map(j =>
+    `<button class="q ${j===audioIdx?'on':''}" data-j="${j}"><b>${j+1}</b><span>${nombrePantalla(j)}</span></button>`).join("");
+  map.querySelectorAll(".q").forEach(b=>{
+    let last = 0;
+    b.onclick = ()=>{
+      const j = +b.dataset.j, now = Date.now();
+      if (now - last < 350 && j === audioIdx) { toggleFocus(); last = 0; return; }   // doble toque
+      last = now;
+      if (j !== audioIdx || pref.muted) setAudio(j);
+    };
+  });
+  document.getElementById("vol").value = pref.vol;
+  document.getElementById("mute").classList.toggle("act", !!pref.muted);
+  document.getElementById("mute").textContent = pref.muted ? "🔈" : "🔇";
+  document.getElementById("lay").classList.toggle("act", !!pref.focus);
+  cells.forEach((c,j)=>{ const b = c.querySelector(".badge"); if (b) b.textContent = (pref.muted ? "🔇 " : "🔊 ") + nombrePantalla(j); });
 }
 
 // ---- Reproducción con respaldo automático ----
@@ -174,10 +282,10 @@ function probar(i, list, k, my){
   const timer = setTimeout(siguiente, 20000);
   YT_READY.then(()=> {
     if (my !== token[i]) return;
-    new YT.Player(f, { events: {
+    players[i] = new YT.Player(f, { events: {
       onReady: ev => { try { ev.target.mute(); ev.target.playVideo(); } catch(e){} },
       onStateChange: ev => {
-        if (ev.data === 1 && !done) { done = true; anyPlaying = true; clearTimeout(timer); if (i === audioIdx) { ev.target.unMute(); ev.target.setVolume(100); } }
+        if (ev.data === 1 && !done) { done = true; anyPlaying = true; clearTimeout(timer); applyAudio(i); updateHub(); }
         if (ev.data === 0) setTimeout(()=> { if (my === token[i]) render(i); }, 5000); // terminó la transmisión: buscar de nuevo
       },
       onError: siguiente
@@ -192,6 +300,8 @@ function probar(i, list, k, my){
   t.querySelector(".rl").onclick = ()=>{ _lj = null; render(i); };
   t.querySelector(".ed").onclick = ()=> showSetup(i);
   c.appendChild(t);
+  const bd = document.createElement("div"); bd.className = "badge"; c.appendChild(bd);
+  updateHub();
 }
 
 // Si el iPad no deja que los videos partan solos (p. ej. modo de bajo consumo), un toque los inicia.
@@ -224,6 +334,12 @@ function showSetup(i){
 for (let i=0;i<4;i++){ const c=document.createElement("div"); c.className="cell"; grid.appendChild(c); cells.push(c); }
 cells.forEach((_,i)=>render(i));
 cells[audioIdx].classList.add("audio");
+updateHub();
+document.getElementById("mute").onclick = toggleMute;
+document.getElementById("lay").onclick = toggleFocus;
+document.getElementById("vol").oninput = e => setVol(+e.target.value);
+document.getElementById("hide").onclick = ()=>{ pref.min = true; savePref(); updateHub(); };
+document.querySelector("#hub .mini").onclick = ()=>{ pref.min = false; savePref(); updateHub(); };
 
 function toggleFS(){ document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(()=>{}); }
 const fsOK = !!document.documentElement.requestFullscreen;
@@ -235,6 +351,12 @@ document.addEventListener("keydown", e=>{
   if (e.key==="f"||e.key==="F") toggleFS();
   if (e.key==="e"||e.key==="E") cells.forEach((_,i)=>showSetup(i));
   if (["1","2","3","4"].includes(e.key)) setAudio(+e.key-1);
+  if (e.key==="m"||e.key==="M") toggleMute();
+  if (e.key==="g"||e.key==="G") toggleFocus();
+  if (e.key==="ArrowUp") setVol(pref.vol+10);
+  if (e.key==="ArrowDown") setVol(pref.vol-10);
+  if (e.key==="ArrowRight") setAudio((audioIdx+1)%4);
+  if (e.key==="ArrowLeft") setAudio((audioIdx+3)%4);
 });
 
 let tm;
