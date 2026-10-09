@@ -279,7 +279,9 @@ function probar(i, list, k, my){
 
   let done = false;
   const siguiente = ()=>{ if (done || my !== token[i]) return; done = true; clearTimeout(timer); probar(i, list, k+1, my); };
-  const timer = setTimeout(siguiente, 20000);
+  // si la app está en segundo plano los videos no parten: esperamos a que vuelva antes de descartar la opción
+  const vencio = ()=>{ if (document.hidden) { timer = setTimeout(vencio, 5000); return; } siguiente(); };
+  let timer = setTimeout(vencio, 20000);
   YT_READY.then(()=> {
     if (my !== token[i]) return;
     players[i] = new YT.Player(f, { events: {
@@ -305,7 +307,7 @@ function probar(i, list, k, my){
 }
 
 // Si el iPad no deja que los videos partan solos (p. ej. modo de bajo consumo), un toque los inicia.
-setTimeout(()=>{ if (!anyPlaying) document.getElementById("tapAll").style.display = "flex"; }, 12000);
+setTimeout(function chk(){ if (document.hidden) return setTimeout(chk, 3000); if (!anyPlaying) document.getElementById("tapAll").style.display = "flex"; }, 25000);
 
 function showSetup(i){
   const c = cells[i];
@@ -345,7 +347,7 @@ function toggleFS(){ document.fullscreenElement ? document.exitFullscreen() : do
 const fsOK = !!document.documentElement.requestFullscreen;
 if (!fsOK || navigator.standalone || matchMedia("(display-mode: standalone)").matches) document.getElementById("fs").style.display = "none";
 document.getElementById("fs").onclick = toggleFS;
-document.getElementById("tapAll").onclick = ()=>{ document.getElementById("tapAll").style.display="none"; cells.forEach((_,i)=>render(i)); };
+document.getElementById("tapAll").onclick = ()=>{ document.getElementById("tapAll").style.display="none"; players.forEach((p,j)=>{ try{ p.playVideo(); applyAudio(j); }catch(e){} }); };
 document.getElementById("editAll").onclick = ()=> cells.forEach((_,i)=>showSetup(i));
 document.addEventListener("keydown", e=>{
   if (e.key==="f"||e.key==="F") toggleFS();
