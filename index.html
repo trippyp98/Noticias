@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Noticias">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="icono.png">
+<link rel="icon" href="icono.png">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Noticias Chile x4</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:system-ui,sans-serif;color:#eee}
+  body.idle{cursor:none}
+  #grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;width:100vw;height:100vh;height:100dvh}
+  html,body{-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  .cell{position:relative;overflow:hidden;background:#000}
+  .cell iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+  .setup{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:12px;padding:16px;background:#111;z-index:2}
+  .setup h3{font-size:15px;font-weight:600;color:#aaa}
+  .chs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:min(560px,100%)}
+  .chs button{background:#1f2a3a;padding:10px 6px}
+  .chs button.on{background:#2d6cdf}
+  .row{display:flex;gap:6px;width:min(560px,100%)}
+  .setup input{flex:1;min-width:0;padding:9px 10px;border-radius:6px;border:1px solid #444;background:#1c1c1c;color:#fff;font-size:14px}
+  button{cursor:pointer;border:0;border-radius:6px;padding:9px 14px;font-size:14px;background:#2d6cdf;color:#fff}
+  button.sec{background:#333}
+  .hint{font-size:12px;color:#888;text-align:center;max-width:560px;line-height:1.5}
+  .hint a{color:#9cf}
+  .tools{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:3;transition:opacity .3s}
+  .tools button{padding:5px 9px;font-size:13px;background:rgba(0,0,0,.65)}
+  .cell.audio .tools .snd{background:#2d6cdf}
+  body.idle .tools,body.idle #bar{opacity:0;pointer-events:none}
+  #bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:5;display:flex;gap:6px;transition:opacity .3s}
+  #bar button{background:rgba(0,0,0,.7);font-size:13px;padding:7px 12px}
+  #warn{position:fixed;inset:0;z-index:9;background:#111;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="grid"></div>
+<div id="bar">
+  <button id="fs">⛶ Pantalla completa (F)</button>
+  <button id="editAll" class="sec">✎ Cambiar canales (E)</button>
+</div>
+<div id="warn"><div>Esta página se abrió como archivo y YouTube la bloquea (Error 153).<br>Ciérrala y ábrela con <b>Abrir Noticias.bat</b>, que está en la misma carpeta.</div></div>
+
+<script>
+// Canales de noticias de Chile en YouTube (ID de canal; se muestra su transmisión en vivo actual)
+const CANALES = [
+  // vid = último video en vivo conocido (8 oct 2026), se usa solo si no se puede averiguar el actual
+  {n:"24 Horas (TVN)", id:"UCTXNz3gjAypWp3EhlIATEJQ", vid:"3JM61yuIzS4"},
+  {n:"T13", id:"UCsRnhjcUCR78Q3Ud6OXCTNg", vid:"oy1dvCRd42s"},
+  {n:"CNN Chile", id:"UCpOAcjJNAp0Y0fhznRrXIJQ", vid:"Fgdw807FSl8"},
+  {n:"Meganoticias", id:"UCkccyEbqhhM3uKOI6Shm-4Q", vid:"0-T-97RbSV8"},
+  {n:"CHV Noticias", id:"UCRsUoZYC1ULUspipMRnMhwg", vid:"C_P66PCQK3k"},
+  {n:"BioBío TV", id:"UCUyXwD-J--EZlv90KHyqOUg", vid:"akuL1FgEUmM"}
+];
+const KEY = "noticias4_v2";
+let urls = CANALES.slice(0,4).map(c=>c.id);
+try { const s = JSON.parse(localStorage.getItem(KEY)); if (Array.isArray(s) && s.length===4) urls = s; } catch(e){}
+let audioIdx = 0;
+
+if (location.protocol === "file:") document.getElementById("warn").style.display = "flex";
+
+function toEmbed(input){
+  const s = (input||"").trim();
+  if(!s) return null;
+  const p = "autoplay=1&mute=1&controls=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3&disablekb=1&enablejsapi=1&origin=" + encodeURIComponent(location.origin);
+  let m = s.match(/(?:v=|youtu\.be\/|\/live\/|\/embed\/|\/shorts\/)([\w-]{11})/) || s.match(/^([\w-]{11})$/);
+  if (m) return "https://www.youtube.com/embed/" + m[1] + "?" + p;
+  m = s.match(/(UC[\w-]{22})/);
+  if (m) return "https://www.youtube.com/embed/live_stream?channel=" + m[1] + "&" + p;
+  if (/^https?:\/\//.test(s)) return s;
+  return null;
+}
+
+const grid = document.getElementById("grid");
+const cells = [];
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(urls)); }catch(e){} }
+
+function ytCmd(i, func, args){
+  const f = cells[i].querySelector("iframe");
+  if (f && f.src.includes("youtube")) f.contentWindow.postMessage(JSON.stringify({event:"command",func,args:args||[]}), "*");
+}
+function setAudio(i){
+  audioIdx = i;
+  cells.forEach((c,j)=>{ c.classList.toggle("audio", j===i); if(j===i){ ytCmd(j,"unMute"); ytCmd(j,"setVolume",[100]); } else ytCmd(j,"mute"); });
+}
+
+async function render(i){
+  const c = cells[i];
+  c.innerHTML = "";
+  let src = urls[i];
+  // Si es un canal, le pedimos al servidor local el video en vivo actual (más confiable que live_stream)
+  if (/^UC[\w-]{22}$/.test(src) && location.protocol.startsWith("http")) {
+    const ch = src, pre = CANALES.find(x=>x.id===ch);
+    try { const v = (await fetch("/live?ch=" + ch).then(r=>r.ok ? r.text() : "")).trim(); if (/^[\w-]{11}$/.test(v)) src = v; } catch(e){}
+    if (src === ch && pre && pre.vid && location.hostname === "localhost") src = pre.vid;
+  }
+  const emb = toEmbed(src);
+  if (!emb) return showSetup(i);
+  const f = document.createElement("iframe");
+  f.src = emb;
+  f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+  f.referrerPolicy = "strict-origin-when-cross-origin";
+  f.addEventListener("load", ()=> setTimeout(()=>{ ytCmd(i, i===audioIdx ? "unMute" : "mute"); }, 2000));
+  c.appendChild(f);
+  const t = document.createElement("div");
+  t.className = "tools";
+  t.innerHTML = '<button class="snd" title="Escuchar este (tecla '+(i+1)+')">🔊 '+(i+1)+'</button><button class="rl" title="Recargar">⟳</button><button class="ed" title="Cambiar canal">✎</button>';
+  t.querySelector(".snd").onclick = ()=> setAudio(i);
+  t.querySelector(".rl").onclick = ()=> render(i);
+  t.querySelector(".ed").onclick = ()=> showSetup(i);
+  c.appendChild(t);
+}
+
+function showSetup(i){
+  const c = cells[i];
+  c.querySelector(".setup")?.remove();
+  const d = document.createElement("div");
+  d.className = "setup";
+  const cur = urls[i];
+  const isLink = !CANALES.some(ch=>ch.id===cur);
+  d.innerHTML = `
+    <h3>Pantalla ${i+1}: elige un canal</h3>
+    <div class="chs">${CANALES.map((ch,k)=>`<button data-k="${k}" class="${ch.id===cur?'on':''}">${ch.n}</button>`).join("")}</div>
+    <div class="row"><input placeholder="…o pega un link de YouTube" value="${isLink ? cur.replace(/"/g,'&quot;') : ''}"><button class="ok">OK</button></div>
+    <p class="hint">Si un canal sale "no disponible", es que en ese momento tiene otra transmisión principal.
+      Abre <a target="_blank" rel="noopener" href="https://www.youtube.com/results?search_query=noticias+chile+en+vivo&sp=EgJAAQ%253D%253D">los en vivo de Chile ↗</a>,
+      copia el link del video que quieras y pégalo arriba.</p>
+    ${cur ? '<button class="sec cancel">Cancelar</button>' : ''}`;
+  d.querySelectorAll(".chs button").forEach(b=> b.onclick = ()=>{ urls[i]=CANALES[+b.dataset.k].id; save(); render(i); });
+  const inp = d.querySelector("input");
+  const ok = ()=>{ if(!toEmbed(inp.value)){ inp.style.borderColor="#d44"; return; } urls[i]=inp.value.trim(); save(); render(i); };
+  d.querySelector(".ok").onclick = ok;
+  inp.addEventListener("keydown", e=>{ e.stopPropagation(); if(e.key==="Enter") ok(); });
+  d.querySelector(".cancel")?.addEventListener("click", ()=> d.remove());
+  c.appendChild(d);
+}
+
+for (let i=0;i<4;i++){ const c=document.createElement("div"); c.className="cell"; grid.appendChild(c); cells.push(c); }
+cells.forEach((_,i)=>render(i));
+cells[audioIdx].classList.add("audio");
+
+function toggleFS(){ document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(()=>{}); }
+const fsOK = !!document.documentElement.requestFullscreen;
+if (!fsOK || navigator.standalone || matchMedia("(display-mode: standalone)").matches) document.getElementById("fs").style.display = "none";
+document.getElementById("fs").onclick = toggleFS;
+document.getElementById("editAll").onclick = ()=> cells.forEach((_,i)=>showSetup(i));
+document.addEventListener("keydown", e=>{
+  if (e.key==="f"||e.key==="F") toggleFS();
+  if (e.key==="e"||e.key==="E") cells.forEach((_,i)=>showSetup(i));
+  if (["1","2","3","4"].includes(e.key)) setAudio(+e.key-1);
+});
+
+let tm;
+function wake(){ document.body.classList.remove("idle"); clearTimeout(tm); tm=setTimeout(()=>document.body.classList.add("idle"), ("ontouchend" in document) ? 5000 : 2500); }
+document.addEventListener("mousemove", wake);
+document.addEventListener("touchstart", wake, {passive:true});
+wake();
+</script>
+</body>
+</html>
