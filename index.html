@@ -76,6 +76,10 @@
   #hub .row2 button{flex:none;width:40px;height:40px;padding:0;border-radius:10px;background:#1f2633;font-size:17px}
   #hub .row2 button.act{background:#2d6cdf}
   #hub input[type=range]{flex:1;min-width:0;accent-color:#2d6cdf;height:28px}
+  #hub .row3{display:flex;gap:6px;margin-top:6px}
+  #hub .row3 button{flex:1 1 0;min-width:0;height:40px;padding:0 2px;border-radius:10px;background:#1f2633;font-size:12px;white-space:nowrap}
+  #hub .row3 button:active{background:#2d6cdf}
+  body.editing #hub{display:none}
   #hub .hint2{margin-top:6px;font-size:11px;color:#8792a6;text-align:center}
   #toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:9;background:rgba(0,0,0,.8);padding:8px 14px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none}
   #toast.show{opacity:1}
@@ -98,7 +102,12 @@
       <button id="lay" title="Agrandar la pantalla con audio (G)">⛶</button>
       <button id="hide" title="Achicar este control">✕</button>
     </div>
-    <div class="hint2">Toca una pantalla para escucharla · doble toque = agrandar</div>
+    <div class="row3">
+      <button id="rlOne" title="Recargar la pantalla seleccionada (R)">⟳ <span>Recargar</span></button>
+      <button id="edOne" title="Cambiar canal o link de la pantalla seleccionada (C)">✎ <span>Cambiar</span></button>
+      <button id="rlAll" title="Recargar las 4 pantallas (Shift+R)">⟳ <span>Todas</span></button>
+    </div>
+    <div class="hint2" id="sel">Toca una pantalla para escucharla · doble toque = agrandar</div>
   </div>
 </div>
 <div id="toast"></div>
@@ -198,6 +207,7 @@ function updateHub(){
       if (j !== audioIdx || pref.muted) setAudio(j);
     };
   });
+  document.getElementById("sel").textContent = "Botones de abajo → pantalla " + (audioIdx+1) + " · doble toque = agrandar";
   document.getElementById("vol").value = pref.vol;
   document.getElementById("mute").classList.toggle("act", !!pref.muted);
   document.getElementById("mute").textContent = pref.muted ? "🔈" : "🔇";
@@ -247,6 +257,7 @@ async function opciones(i){
 
 function render(i){
   const c = cells[i];
+  setTimeout(()=>{ if (!document.querySelector(".setup")) document.body.classList.remove("editing"); }, 0);
   const my = ++token[i];
   c.innerHTML = "";
   delete showing[i];
@@ -314,6 +325,7 @@ function showSetup(i){
   c.querySelector(".setup")?.remove();
   const d = document.createElement("div");
   d.className = "setup";
+  document.body.classList.add("editing");
   const cur = urls[i];
   const isLink = !CANALES.some(ch=>ch.id===cur);
   d.innerHTML = `
@@ -329,7 +341,7 @@ function showSetup(i){
   const ok = ()=>{ if(!toEmbed(inp.value)){ inp.style.borderColor="#d44"; return; } urls[i]=inp.value.trim(); save(); render(i); };
   d.querySelector(".ok").onclick = ok;
   inp.addEventListener("keydown", e=>{ e.stopPropagation(); if(e.key==="Enter") ok(); });
-  d.querySelector(".cancel")?.addEventListener("click", ()=> d.remove());
+  d.querySelector(".cancel")?.addEventListener("click", ()=>{ d.remove(); if (!document.querySelector(".setup")) document.body.classList.remove("editing"); });
   c.appendChild(d);
 }
 
@@ -340,6 +352,9 @@ updateHub();
 document.getElementById("mute").onclick = toggleMute;
 document.getElementById("lay").onclick = toggleFocus;
 document.getElementById("vol").oninput = e => setVol(+e.target.value);
+document.getElementById("rlOne").onclick = ()=>{ _lj = null; render(audioIdx); toast("⟳ Recargando pantalla " + (audioIdx+1)); };
+document.getElementById("rlAll").onclick = ()=>{ _lj = null; cells.forEach((_,j)=>render(j)); toast("⟳ Recargando las 4 pantallas"); };
+document.getElementById("edOne").onclick = ()=> showSetup(audioIdx);
 document.getElementById("hide").onclick = ()=>{ pref.min = true; savePref(); updateHub(); };
 document.querySelector("#hub .mini").onclick = ()=>{ pref.min = false; savePref(); updateHub(); };
 
@@ -354,6 +369,9 @@ document.addEventListener("keydown", e=>{
   if (e.key==="e"||e.key==="E") cells.forEach((_,i)=>showSetup(i));
   if (["1","2","3","4"].includes(e.key)) setAudio(+e.key-1);
   if (e.key==="m"||e.key==="M") toggleMute();
+  if (e.key==="r") { _lj = null; render(audioIdx); }
+  if (e.key==="R") { _lj = null; cells.forEach((_,j)=>render(j)); }
+  if (e.key==="c"||e.key==="C") showSetup(audioIdx);
   if (e.key==="g"||e.key==="G") toggleFocus();
   if (e.key==="ArrowUp") setVol(pref.vol+10);
   if (e.key==="ArrowDown") setVol(pref.vol-10);
