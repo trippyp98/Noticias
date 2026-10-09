@@ -91,15 +91,26 @@ function setAudio(i){
   cells.forEach((c,j)=>{ c.classList.toggle("audio", j===i); if(j===i){ ytCmd(j,"unMute"); ytCmd(j,"setVolume",[100]); } else ytCmd(j,"mute"); });
 }
 
+let _lj;
+function liveJson(){
+  if (!_lj) _lj = fetch("live.json?t=" + Date.now(), {cache:"no-store"}).then(r=>r.ok ? r.json() : null).catch(()=>null);
+  return _lj;
+}
+
 async function render(i){
   const c = cells[i];
   c.innerHTML = "";
   let src = urls[i];
-  // Si es un canal, le pedimos al servidor local el video en vivo actual (más confiable que live_stream)
+  // Si es un canal, buscamos el video en vivo actual:
+  // 1) live.json (lo actualiza GitHub cada 15 min)  2) servidor local  3) último video conocido  4) transmisión del canal
   if (/^UC[\w-]{22}$/.test(src) && location.protocol.startsWith("http")) {
     const ch = src, pre = CANALES.find(x=>x.id===ch);
-    try { const v = (await fetch("/live?ch=" + ch).then(r=>r.ok ? r.text() : "")).trim(); if (/^[\w-]{11}$/.test(v)) src = v; } catch(e){}
-    if (src === ch && pre && pre.vid && location.hostname === "localhost") src = pre.vid;
+    const lj = await liveJson();
+    if (lj && /^[\w-]{11}$/.test(lj[ch] || "")) src = lj[ch];
+    if (src === ch && location.hostname === "localhost") {
+      try { const v = (await fetch("/live?ch=" + ch).then(r=>r.ok ? r.text() : "")).trim(); if (/^[\w-]{11}$/.test(v)) src = v; } catch(e){}
+    }
+    if (src === ch && pre && pre.vid) src = pre.vid;
   }
   const emb = toEmbed(src);
   if (!emb) return showSetup(i);
@@ -113,7 +124,7 @@ async function render(i){
   t.className = "tools";
   t.innerHTML = '<button class="snd" title="Escuchar este (tecla '+(i+1)+')">🔊 '+(i+1)+'</button><button class="rl" title="Recargar">⟳</button><button class="ed" title="Cambiar canal">✎</button>';
   t.querySelector(".snd").onclick = ()=> setAudio(i);
-  t.querySelector(".rl").onclick = ()=> render(i);
+  t.querySelector(".rl").onclick = ()=>{ _lj = null; render(i); };
   t.querySelector(".ed").onclick = ()=> showSetup(i);
   c.appendChild(t);
 }
