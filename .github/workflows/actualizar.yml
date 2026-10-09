@@ -31,9 +31,11 @@ jobs:
                   print(nombre, "YouTube no entregó la página; se mantiene el dato anterior"); continue
               m = re.search(r'rel="canonical" href="https://www\.youtube\.com/watch\?v=([\w-]{11})"', h)
               st = re.search(r'"playabilityStatus":\{"status":"(\w+)"', h)
-              en_vivo = bool(m and st and st.group(1) == "OK" and '"isUpcoming":true' not in h)
+              estado = st.group(1) if st else "?"
+              # /live solo muestra un video si el canal transmite ahora o tiene uno programado
+              en_vivo = bool(m) and '"isUpcoming":true' not in h and estado != "LIVE_STREAM_OFFLINE"
               data[ch] = m.group(1) if en_vivo else ""
-              print(nombre, "->", data[ch] or "no está en vivo")
+              print(nombre, "->", data[ch] or "no está en vivo", f"(estado {estado})")
           json.dump(data, open("live.json", "w"), indent=2)
       - name: Guardar cambios
         run: |
