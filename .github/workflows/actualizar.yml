@@ -1,0 +1,32 @@
+name: Actualizar en vivo
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Buscar videos en vivo
+        run: |
+          CANALES="UCTXNz3gjAypWp3EhlIATEJQ UCsRnhjcUCR78Q3Ud6OXCTNg UCpOAcjJNAp0Y0fhznRrXIJQ UCkccyEbqhhM3uKOI6Shm-4Q UCRsUoZYC1ULUspipMRnMhwg UCUyXwD-J--EZlv90KHyqOUg"
+          [ -f live.json ] || echo '{}' > live.json
+          for ch in $CANALES; do
+            v=$(curl -sL -m 20 \
+              -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36' \
+              -H 'Cookie: CONSENT=YES+cb; SOCS=CAI' -H 'Accept-Language: es-CL,es' \
+              "https://www.youtube.com/channel/$ch/live" \
+              | grep -o 'rel="canonical" href="https://www.youtube.com/watch?v=[A-Za-z0-9_-]\{11\}' | head -1 | tail -c 12)
+            echo "$ch -> ${v:-sin dato}"
+            if [ -n "$v" ]; then jq --arg c "$ch" --arg v "$v" '.[$c]=$v' live.json > t.json && mv t.json live.json; fi
+          done
+          cat live.json
+      - name: Guardar cambios
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add live.json
+          git diff --cached --quiet || (git commit -m "Actualizar videos en vivo" && git push)
