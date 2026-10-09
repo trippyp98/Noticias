@@ -29,7 +29,10 @@ jobs:
                   print(nombre, "error:", e); continue
               if "ytInitialData" not in h:
                   print(nombre, "YouTube no entregó la página; se mantiene el dato anterior"); continue
-              m = re.search(r'rel="canonical" href="https://www\.youtube\.com/watch\?v=([\w-]{11})"', h)
+              m = (re.search(r'rel="canonical" href="https://www\.youtube\.com/watch\?v=([\w-]{11})"', h)
+                   or re.search(r'"videoDetails":\{"videoId":"([\w-]{11})"', h)
+                   or re.search(r'property="og:url" content="https://www\.youtube\.com/watch\?v=([\w-]{11})"', h)
+                   or re.search(r'"currentVideoEndpoint":\{[^{}]*?"watchEndpoint":\{"videoId":"([\w-]{11})"', h))
               st = re.search(r'"playabilityStatus":\{"status":"(\w+)"', h)
               estado = st.group(1) if st else "?"
               # /live solo muestra un video si el canal transmite ahora o tiene uno programado
