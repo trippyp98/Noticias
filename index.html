@@ -51,9 +51,9 @@
 <script>
 // Canales de noticias de Chile en YouTube (ID de canal; se muestra su transmisión en vivo actual)
 const CANALES = [
-  // vid = último video en vivo conocido (8 oct 2026), se usa solo si no se puede averiguar el actual
-  {n:"24 Horas (TVN)", id:"UCTXNz3gjAypWp3EhlIATEJQ", vid:"3JM61yuIzS4"},
-  {n:"T13", id:"UCsRnhjcUCR78Q3Ud6OXCTNg", vid:"oy1dvCRd42s"},
+  // vid = último video en vivo conocido (9 oct 2026), se usa solo si no se puede averiguar el actual
+  {n:"24 Horas (TVN)", id:"UCTXNz3gjAypWp3EhlIATEJQ", vid:"R1zazWO2How"},
+  {n:"T13", id:"UCsRnhjcUCR78Q3Ud6OXCTNg", vid:"8eIYlB__Z4k"},
   {n:"CNN Chile", id:"UCpOAcjJNAp0Y0fhznRrXIJQ", vid:"Fgdw807FSl8"},
   {n:"Meganoticias", id:"UCkccyEbqhhM3uKOI6Shm-4Q", vid:"0-T-97RbSV8"},
   {n:"CHV Noticias", id:"UCRsUoZYC1ULUspipMRnMhwg", vid:"C_P66PCQK3k"},
@@ -92,6 +92,7 @@ function setAudio(i){
 }
 
 let _lj;
+const subs = {};   // pantalla -> canal de reemplazo
 function liveJson(){
   if (!_lj) _lj = fetch("live.json?t=" + Date.now(), {cache:"no-store"}).then(r=>r.ok ? r.json() : null).catch(()=>null);
   return _lj;
@@ -100,13 +101,22 @@ function liveJson(){
 async function render(i){
   const c = cells[i];
   c.innerHTML = "";
+  delete subs[i];
   let src = urls[i];
   // Si es un canal, buscamos el video en vivo actual:
-  // 1) live.json (lo actualiza GitHub cada 15 min)  2) servidor local  3) último video conocido  4) transmisión del canal
+  // 1) live.json (GitHub lo actualiza cada 15 min; "" = el canal no está transmitiendo)
+  // 2) servidor local del PC  3) último video conocido
+  // Si el canal no está en vivo, se muestra otro canal de la lista que sí lo esté.
   if (/^UC[\w-]{22}$/.test(src) && location.protocol.startsWith("http")) {
     const ch = src, pre = CANALES.find(x=>x.id===ch);
     const lj = await liveJson();
-    if (lj && /^[\w-]{11}$/.test(lj[ch] || "")) src = lj[ch];
+    if (lj && ch in lj) {
+      if (/^[\w-]{11}$/.test(lj[ch])) src = lj[ch];
+      else {
+        const alt = CANALES.find(x => /^[\w-]{11}$/.test(lj[x.id]||"") && !urls.includes(x.id) && !Object.values(subs).includes(x.id) );
+        if (alt) { subs[i] = alt.id; src = lj[alt.id]; }
+      }
+    }
     if (src === ch && location.hostname === "localhost") {
       try { const v = (await fetch("/live?ch=" + ch).then(r=>r.ok ? r.text() : "")).trim(); if (/^[\w-]{11}$/.test(v)) src = v; } catch(e){}
     }
